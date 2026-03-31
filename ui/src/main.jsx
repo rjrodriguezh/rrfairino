@@ -1,10 +1,11 @@
+//main.jsx
 import React from "react";
 import ReactDOM from "react-dom/client";
-import CartesianPlayground from "./pages/CartesianPlayground.jsx";
-import "./style.css";
+import App from "../../src/app/App.jsx";
+import { BrowserRouter } from "react-router-dom";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <CartesianPlayground />
-  </React.StrictMode>
+  <BrowserRouter>
+    <App />
+  </BrowserRouter>
 );
