@@ -3,9 +3,20 @@ import RobotScene3D from "./RobotScene3D";
 
 function readRobot3DData() {
   try {
-    return JSON.parse(localStorage.getItem("robot3d_data") || "{}");
-  } catch {
-    return {};
+    const raw = localStorage.getItem("robot3d_data");
+    if (!raw) {
+      return { paintAreas: [], floorDefs: [], ts: 0 };
+    }
+
+    const parsed = JSON.parse(raw);
+    return {
+      paintAreas: parsed?.paintAreas ?? [],
+      floorDefs: parsed?.floorDefs ?? [],
+      ts: parsed?.ts ?? 0,
+    };
+  } catch (error) {
+    console.error("Error leyendo robot3d_data:", error);
+    return { paintAreas: [], floorDefs: [], ts: 0 };
   }
 }
 
@@ -14,8 +25,12 @@ export default function Robot3DWindow() {
 
   useEffect(() => {
     const refresh = () => {
-      setData(readRobot3DData());
+      const next = readRobot3DData();
+      console.log("[3D WINDOW] data leída:", next);
+      setData(next);
     };
+
+    refresh();
 
     const handleStorage = (e) => {
       if (e.key === "robot3d_data") {

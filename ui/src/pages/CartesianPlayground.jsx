@@ -1,29 +1,8 @@
 //CartesianPlayground.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react"; 
+import RobotScene3D from "./RobotScene3D";
+import { messages } from "/src/i18n.js";
 
-
-{/**
-function open3DPopup() {
-  localStorage.setItem(
-    "robot3d_data",
-    JSON.stringify({
-      paintAreas,
-      floorDefs,
-      ts: Date.now(),
-    })
-  );
-
-  const popup = window.open(
-    "/robot-3d",
-    "robot3d",
-    "width=1400,height=900"
-  );
-
-  if (!popup) {
-    alert("Popup bloqueado");
-  }
-}
- */}
 function getAutoFloorColor(floor) {
   const colors = [
     "#2563eb", // azul
@@ -31,6 +10,7 @@ function getAutoFloorColor(floor) {
     "#92400e", // café
     "#f97316", // naranjo
     "#7c3aed", // morado (extra)
+    "#c3ed3a", // morado (extra)
   ];
 
   const index = (Number(floor) - 1) % colors.length;
@@ -464,6 +444,18 @@ function parseBoxNumber(label) {
   return m ? Number(m[0]) : Number.POSITIVE_INFINITY;
 }
 
+
+function sortBlueAreasForList(list) {
+  return [...(list || [])].sort((a, b) => {
+    const na = parseBoxNumber(a.label);
+    const nb = parseBoxNumber(b.label);
+
+    if (na !== nb) return na - nb;
+    return String(a.label).localeCompare(String(b.label));
+  });
+}
+
+
 function sortBoxesForLua(list) {
   return [...(list || [])].sort((a, b) => {
     const na = parseBoxNumber(a.label);
@@ -598,27 +590,129 @@ function getAreaCenter(area) {
 export default function CartesianPlayground() {
 
 
-  
-    function open3DPopup() {
-      const popup = window.open(
-        "/robot-3d",
-        "robot3d",
-        "width=1400,height=900"
-      );
+function getAreaCenter(area) {
+  const pts = area?.points ?? [];
+  if (!pts.length) return { x: 0, y: 0 };
 
-      if (!popup) {
-        alert("Popup bloqueado");
-        return;
+  const xs = pts.map((p) => Number(p.x || 0));
+  const ys = pts.map((p) => Number(p.y || 0));
+
+  return {
+    x: (Math.min(...xs) + Math.max(...xs)) / 2,
+    y: (Math.min(...ys) + Math.max(...ys)) / 2,
+  };
+}
+
+function getAreaBBoxSize(area) {
+  const pts = area?.points ?? [];
+  if (!pts.length) return { w: 300, h: 400 };
+
+  const xs = pts.map((p) => Number(p.x || 0));
+  const ys = pts.map((p) => Number(p.y || 0));
+
+  return {
+    w: Math.max(1, Math.max(...xs) - Math.min(...xs)),
+    h: Math.max(1, Math.max(...ys) - Math.min(...ys)),
+  };
+}
+
+function getRotationDeg(area) {
+  const raw = Number(
+    area?.rotationDeg ??
+    area?.rot ??
+    area?.rotation ??
+    area?.rz ??
+    0
+  );
+
+  const normalized = ((raw % 360) + 360) % 360;
+
+  if (normalized === 270) return -90;
+  if (normalized === 90) return 90;
+  if (normalized === 180) return 0;
+  return 0;
+}
+
+function normalizePaintAreasFor3D(paintAreas = []) {
+  return (paintAreas ?? []).map((area, index) => {
+    const center = getAreaCenter(area);
+    const bbox = getAreaBBoxSize(area);
+    const rotationDeg = getRotationDeg(area);
+
+    let widthMm = Number(
+      area?.widthMm ??
+      area?.itemWidthMm ??
+      area?.baseWidthMm ??
+      area?.width ??
+      area?.w ??
+      area?.anchoMm ??
+      area?.ancho ??
+      0
+    );
+
+    let depthMm = Number(
+      area?.depthMm ??
+      area?.itemDepthMm ??
+      area?.baseDepthMm ??
+      area?.heightMm ??
+      area?.height ??
+      area?.h ??
+      area?.altoMm ??
+      area?.alto ??
+      0
+    );
+
+    // Si no vienen medidas base reales, las reconstruimos desde el bbox
+    // corrigiendo el caso 90/-90.
+    if (!(widthMm > 0) || !(depthMm > 0)) {
+      if (Math.abs(rotationDeg) === 90) {
+        widthMm = bbox.h;
+        depthMm = bbox.w;
+      } else {
+        widthMm = bbox.w;
+        depthMm = bbox.h;
       }
-
-      localStorage.setItem(
-        "robot3d_data",
-        JSON.stringify({
-          paintAreas,
-          floorDefs,
-        })
-      );
     }
+
+    return {
+      id: area?.id ?? `box-${index}`,
+      label: area?.label ?? `B${index + 1}`,
+      floor: Number(area?.floor ?? 1),
+      cx: Number(center.x ?? 0),
+      cy: Number(center.y ?? 0),
+      widthMm,
+      depthMm,
+      rotationDeg,
+      source: area?.source ?? "single",
+      points: area?.points ?? [],
+    };
+  });
+}
+
+function open3DPopup() {
+  const paintAreas3D = normalizePaintAreasFor3D(paintAreas);
+
+  localStorage.setItem(
+    "robot3d_data",
+    JSON.stringify({
+      paintAreas: paintAreas3D,
+      floorDefs,
+      ts: Date.now(),
+    })
+  );
+
+  const popup = window.open(
+    "/robot-3d",
+    "robot3d",
+    "width=1400,height=900"
+  );
+
+  if (!popup) {
+    alert("Popup bloqueado");
+    return;
+  }
+}
+
 
   // refs
   const svgRef = useRef(null);
@@ -680,7 +774,13 @@ export default function CartesianPlayground() {
     return () => ro.disconnect();
   }, []);
 
+  //idiomas 
+  const [lang, setLang] = useState(() => localStorage.getItem("app_lang") || "es");
+  const t = messages[lang];
 
+useEffect(() => {
+  localStorage.setItem("app_lang", lang);
+}, [lang]);
 
   // Zoom + Pan (cámara)
   const [zoom, setZoom] = useState(1.0);
@@ -726,9 +826,15 @@ export default function CartesianPlayground() {
 
 
   // Panel add floors and Z value
+
+
+
   const [floorPanelOpen, setFloorPanelOpen] = useState(false);
   const [newFloorNumber, setNewFloorNumber] = useState(1);
   const [newFloorZ, setNewFloorZ] = useState(-900);
+
+
+
 
   const handleFloorChange = (value) => {
     const num = Math.max(1, Number(value) || 1);
@@ -740,7 +846,11 @@ export default function CartesianPlayground() {
 
   const [floorDefs, setFloorDefs] = useState([]);
 
-  
+  // 👇 AQUÍ VA (después del useState)
+  const lastCreatedFloor = Math.max(
+    0,
+    ...(floorDefs ?? []).map((f) => Number(f.floor)).filter(Number.isFinite)
+  );
   const [newFloorSelected, setNewFloorSelected] = useState(1);
 
 //separar items de un piso
@@ -765,6 +875,17 @@ const [spacingError, setSpacingError] = useState("");
   const [moveFloorDy, setMoveFloorDy] = useState(0);
   const [moveError, setMoveError] = useState("");
   const [dragFloorTogether, setDragFloorTogether] = useState(false);
+
+
+  function syncActiveFloor(floor) {
+    const f = Math.max(1, Number(floor) || 1);
+
+    setNewFloorSelected(f);          // Agregar items
+    setBlueAreasFloorFilter(String(f)); // Gestionar items agregados
+    setSpacingFloorNumber(f);        // Separación
+    setCloneSourceFloor(f);          // Clonación origen
+    setMoveFloorNumber(f);           // Mover piso
+  }
 
   useEffect(() => {
     if (!floorDefs || floorDefs.length === 0) return;
@@ -819,12 +940,42 @@ const [spacingError, setSpacingError] = useState("");
   const [paintAreas, setPaintAreas] = useState(() => []);
   const [paintAreasError, setPaintAreasError] = useState("");
 
-
   useEffect(() => {
+    const nextFloor = getNextFloorNumber(floorDefs, paintAreas);
+    setNewFloorNumber(nextFloor);
+    setNewFloorZ(getSuggestedFloorZBase(nextFloor));
+  }, [floorDefs, paintAreas]);
+
+
+{/*
+  useEffect(() => {
+    const paintAreas3D = normalizePaintAreasFor3D(paintAreas);
+
+    localStorage.setItem(
+      "robot3d_data",
+      JSON.stringify({
+        paintAreas: paintAreas3D,
+        floorDefs,
+        ts: Date.now(),
+      })
+    );
+  }, [paintAreas, floorDefs]);
+*/}
+
+
+useEffect(() => {
+  const paintAreas3D = normalizePaintAreasFor3D(paintAreas);
+
+  // 👇 PONLO AQUÍ
+  console.log("CENTROS 2D", paintAreas.map(a => ({
+    label: a.label,
+    center: getAreaCenter(a)
+  })));
+
   localStorage.setItem(
     "robot3d_data",
     JSON.stringify({
-      paintAreas,
+      paintAreas: paintAreas3D,
       floorDefs,
       ts: Date.now(),
     })
@@ -1111,52 +1262,107 @@ const [spacingError, setSpacingError] = useState("");
     setFloorDefs((prev) => {
       const exists = prev.some((f) => f.floor === floor);
 
-      if (exists) {
-        return prev
-          .map((f) => (f.floor === floor ? { ...f, zBase, color } : f))
-          .sort((a, b) => a.floor - b.floor);
-      }
+      const nextDefs = exists
+        ? prev
+            .map((f) => (f.floor === floor ? { ...f, zBase, color } : f))
+            .sort((a, b) => a.floor - b.floor)
+        : [...prev, { floor, zBase, color }].sort((a, b) => a.floor - b.floor);
 
-      return [...prev, { floor, zBase, color }].sort((a, b) => a.floor - b.floor);
+      return nextDefs;
     });
+
+    // dejar listo el siguiente piso automáticamente
+    const nextFloor = floor + 1;
+    setNewFloorNumber(nextFloor);
+    setNewFloorZ(getSuggestedFloorZBase(nextFloor));
+    setNewFloorSelected(floor);
   }
 
   function deleteFloorDef(floorNumber) {
-    setFloorDefs((prev) => prev.filter((f) => f.floor !== floorNumber));
+    const floorToDelete = Number(floorNumber);
+
+    const lastFloor = Math.max(
+      0,
+      ...(floorDefs ?? []).map((f) => Number(f.floor)).filter(Number.isFinite)
+    );
+
+    // solo permitir eliminar el último piso
+    if (floorToDelete !== lastFloor) {
+      return;
+    }
+
+    // eliminar definición del piso
+    setFloorDefs((prev) =>
+      prev.filter((f) => Number(f.floor) !== floorToDelete)
+    );
+
+    // eliminar también los ítems de ese piso
+    setPaintAreas((prev) => {
+      const nextAreas = prev.filter(
+        (a) =>
+          !(a.source === "single" && Number(a.floor ?? 1) === floorToDelete)
+      );
+
+      setNewLabel(getNextBlueLabel(nextAreas));
+      return nextAreas;
+    });
+
+    // dejar listo el formulario en el nuevo último piso + 1
+    const nextLastFloor = Math.max(1, lastFloor - 1);
+    const nextSuggestedFloor = nextLastFloor + 1;
+
+    syncActiveFloor(nextLastFloor);
+    setNewFloorNumber(nextSuggestedFloor);
+    setNewFloorZ(getSuggestedFloorZBase(nextSuggestedFloor));
   }
 
 
-  function exportProjectToJson() {
-    const projectData = {
-      floors: floorDefs ?? [],
-      areas: (paintAreas ?? [])
-        .filter((a) => a.source === "single")
-        .map((a) => {
-          const center = areaSummaryPointMm(a);
+function exportProjectToJson() {
+  const singleAreas = (paintAreas ?? [])
+    .filter((a) => a.source === "single")
+    .map((a) => {
+      const center = areaSummaryPointMm(a);
 
-          const xs = (a.points ?? []).map((p) => p.x);
-          const ys = (a.points ?? []).map((p) => p.y);
+      const xs = (a.points ?? []).map((p) => p.x);
+      const ys = (a.points ?? []).map((p) => p.y);
 
-          const minX = Math.min(...xs);
-          const maxX = Math.max(...xs);
-          const minY = Math.min(...ys);
-          const maxY = Math.max(...ys);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
 
-          return {
-            id: a.id,
-            label: a.label,
-            x: center.x,
-            y: center.y,
-            floor: a.floor ?? 1,
-            rotationDeg: a.rotationDeg ?? 0,
-            w: Math.round(maxX - minX),
-            h: Math.round(maxY - minY),
-          };
-        }),
-    };
+      return {
+        id: a.id,
+        label: a.label,
+        x: center.x,
+        y: center.y,
+        floor: a.floor ?? 1,
+        rotationDeg: a.rotationDeg ?? 0,
+        w: Math.round(maxX - minX),
+        h: Math.round(maxY - minY),
+      };
+    });
 
-    downloadJsonFile("proyecto_robot.json", projectData);
-  }
+  const referenceAreas = (paintAreas ?? [])
+    .filter((a) => a.source !== "single")
+    .map((a) => ({
+      id: a.id,
+      label: a.label,
+      source: a.source ?? "paint",
+      points: (a.points ?? []).map((p) => ({
+        x: Number(p.x),
+        y: Number(p.y),
+      })),
+    }));
+
+  const projectData = {
+    floors: floorDefs ?? [],
+    areas: singleAreas,
+    referenceAreas,
+  };
+
+  downloadJsonFile("proyecto_robot.json", projectData);
+}
 
 
 
@@ -1171,15 +1377,23 @@ const [spacingError, setSpacingError] = useState("");
         const rawText = String(evt.target?.result ?? "");
         const data = JSON.parse(rawText);
 
-        const importedFloors = Array.isArray(data?.grupo2?.pisos)
-        ? data.grupo2.pisos
-        : [];
+        const importedFloors = Array.isArray(data?.floors)
+          ? data.floors
+          : Array.isArray(data?.grupo2?.pisos)
+            ? data.grupo2.pisos
+            : [];
 
-      const importedAreas = Array.isArray(data?.grupo2?.cajas)
-        ? data.grupo2.cajas
-        : [];
+        const importedAreas = Array.isArray(data?.areas)
+          ? data.areas
+          : Array.isArray(data?.grupo2?.cajas)
+            ? data.grupo2.cajas
+            : [];
 
-        const rebuiltAreas = importedAreas.map((a, idx) => {
+        const importedReferenceAreas = Array.isArray(data?.referenceAreas)
+          ? data.referenceAreas
+          : [];
+
+        const rebuiltSingleAreas = importedAreas.map((a, idx) => {
           const x = Number(a.x ?? 0);
           const y = Number(a.y ?? 0);
           const w = Math.max(1, Number(a.w ?? 300));
@@ -1201,7 +1415,7 @@ const [spacingError, setSpacingError] = useState("");
             id:
               a.id ||
               globalThis.crypto?.randomUUID?.() ||
-              `imported-${idx}-${Date.now()}`,
+              `imported-single-${idx}-${Date.now()}`,
             label: truncateLabel5(a.label) || `B${idx + 1}`,
             points: pts,
             source: "single",
@@ -1210,12 +1424,33 @@ const [spacingError, setSpacingError] = useState("");
           };
         });
 
+        const rebuiltReferenceAreas = importedReferenceAreas.map((a, idx) => ({
+          id:
+            a.id ||
+            globalThis.crypto?.randomUUID?.() ||
+            `imported-ref-${idx}-${Date.now()}`,
+          label: truncateLabel5(a.label) || `AREA${idx + 1}`,
+          source: a.source ?? "paint",
+          points: (a.points ?? []).map((p) => ({
+            x: clamp(Number(p.x ?? 0), limits.minX, limits.maxX),
+            y: clamp(Number(p.y ?? 0), limits.minY, limits.maxY),
+          })),
+        }));
+
+        const rebuiltAreas = [...rebuiltReferenceAreas, ...rebuiltSingleAreas];
+
         setFloorDefs(importedFloors);
         setPaintAreas(rebuiltAreas);
         setSelectedAreaId("");
         setNewLabel(getNextBlueLabel(rebuiltAreas));
         setAddOneError("");
         setPaintAreasError("");
+
+        // opcional: reconstruir el textarea del panel Robot y Pallets
+        const referenceText = rebuiltReferenceAreas
+          .map((a) => formatAreaCSVLine(a.label, a.points))
+          .join("\n");
+        setPaintAreasText(referenceText);
       } catch (err) {
         console.error("Error importing project:", err);
         alert("Error al cargar el archivo del proyecto.");
@@ -1252,9 +1487,15 @@ const [spacingError, setSpacingError] = useState("");
     setCloneError("");
 
     const sourceFloor = Number(cloneSourceFloor);
+    let targetFloor = Number(cloneTargetFloor);
 
     if (!Number.isFinite(sourceFloor) || sourceFloor < 1) {
       setCloneError("Piso origen inválido.");
+      return;
+    }
+
+    if (!Number.isFinite(targetFloor) || targetFloor < 1) {
+      setCloneError("Piso destino inválido.");
       return;
     }
 
@@ -1267,10 +1508,37 @@ const [spacingError, setSpacingError] = useState("");
       return;
     }
 
-    const targetFloor = getNextFloorNumber(floorDefs, paintAreas);
-    const targetColor = getAutoFloorColor(targetFloor);
+    const targetFloorExists = (floorDefs ?? []).some(
+      (f) => Number(f.floor) === targetFloor
+    );
 
-    // Crear el nuevo piso automáticamente
+    const targetItems = (paintAreas ?? []).filter(
+      (a) => a.source === "single" && Number(a.floor ?? 1) === targetFloor
+    );
+
+    // Si el piso destino ya tiene items, preguntar qué hacer
+    if (targetItems.length > 0) {
+      const useNextFloor = window.confirm(
+        `El piso ${targetFloor} ya tiene ítems.\n\nAceptar = crear un nuevo piso después del último existente.\nCancelar = reemplazar todos los ítems del piso ${targetFloor}.`
+      );
+
+      if (useNextFloor) {
+        targetFloor = getNextFloorNumber(floorDefs, paintAreas);
+      } else {
+        // mantener targetFloor y reemplazar sus ítems
+        setPaintAreas((prev) =>
+          prev.filter(
+            (a) =>
+              !(a.source === "single" && Number(a.floor ?? 1) === targetFloor)
+          )
+        );
+      }
+    }
+
+    const targetColor = getAutoFloorColor(targetFloor);
+    const targetZBase = getSuggestedFloorZBase(targetFloor);
+
+    // Crear o actualizar el piso destino
     setFloorDefs((prev) => {
       const exists = prev.some((f) => Number(f.floor) === targetFloor);
 
@@ -1281,7 +1549,7 @@ const [spacingError, setSpacingError] = useState("");
               ? {
                   ...f,
                   color: targetColor,
-                  zBase: Number(f.zBase ?? getSuggestedFloorZBase(targetFloor)),
+                  zBase: Number(f.zBase ?? targetZBase),
                 }
               : f
           )
@@ -1292,14 +1560,23 @@ const [spacingError, setSpacingError] = useState("");
         ...prev,
         {
           floor: targetFloor,
-          zBase: getSuggestedFloorZBase(targetFloor),
-          color: getAutoFloorColor(targetFloor),
+          zBase: targetZBase,
+          color: targetColor,
         },
       ].sort((a, b) => a.floor - b.floor);
     });
 
+    // Clonar items al piso destino
     setPaintAreas((prev) => {
-      let nextBlueNumber = getNextGlobalBlueNumber(prev);
+      const baseAreas =
+        targetItems.length > 0 && Number(cloneTargetFloor) === targetFloor
+          ? prev.filter(
+              (a) =>
+                !(a.source === "single" && Number(a.floor ?? 1) === targetFloor)
+            )
+          : prev;
+
+      let nextBlueNumber = getNextGlobalBlueNumber(baseAreas);
 
       const cloned = sourceItems.map((area) => {
         const newLabel = `B${nextBlueNumber}`;
@@ -1311,17 +1588,13 @@ const [spacingError, setSpacingError] = useState("");
         });
       });
 
-      const nextAreas = [...prev, ...cloned];
+      const nextAreas = [...baseAreas, ...cloned];
       setNewLabel(`B${nextBlueNumber}`);
       return nextAreas;
     });
 
-    setBlueAreasFloorFilter(String(targetFloor));
-    setNewFloorSelected(targetFloor);
-
-    // opcional: dejar sugerido el próximo color/piso
+    syncActiveFloor(targetFloor);
     setCloneTargetFloor(targetFloor + 1);
-    setCloneTargetColor(getAutoFloorColor(targetFloor + 1));
   }
 
 
@@ -1376,87 +1649,77 @@ const [spacingError, setSpacingError] = useState("");
   }
 
   // Agrupar por filas usando Y parecido
-  const rowTolerance = 80;
-  const sortedByYThenX = [...floorItems].sort((a, b) => {
-    if (Math.abs(a.centerY - b.centerY) <= rowTolerance) {
-      return a.centerX - b.centerX;
-    }
-    return a.centerY - b.centerY;
-  });
+  // Mantener el orden espacial real del plano:
+// 1) agrupar por filas según Y actual
+// 2) dentro de cada fila, ordenar por X actual
+// 3) usar como ancla la esquina superior-izquierda actual del conjunto,
+//    sin recentrar todo respecto del centro global
 
-  const rows = [];
-  for (const item of sortedByYThenX) {
-    const lastRow = rows[rows.length - 1];
+const rowTolerance = 80;
 
-    if (!lastRow) {
-      rows.push([item]);
-      continue;
-    }
+const sortedByYThenX = [...floorItems].sort((a, b) => {
+  if (Math.abs(a.centerY - b.centerY) <= rowTolerance) {
+    return a.centerX - b.centerX;
+  }
+  return a.centerY - b.centerY;
+});
 
-    const rowAvgY =
-      lastRow.reduce((acc, r) => acc + r.centerY, 0) / lastRow.length;
+const rows = [];
+for (const item of sortedByYThenX) {
+  const lastRow = rows[rows.length - 1];
 
-    if (Math.abs(item.centerY - rowAvgY) <= rowTolerance) {
-      lastRow.push(item);
-    } else {
-      rows.push([item]);
-    }
+  if (!lastRow) {
+    rows.push([item]);
+    continue;
   }
 
-  // Ordenar cada fila por X
-  rows.forEach((row) => row.sort((a, b) => a.centerX - b.centerX));
+  const rowAvgY =
+    lastRow.reduce((acc, r) => acc + r.centerY, 0) / lastRow.length;
 
-  // Centro global del conjunto
-  const allCentersX = floorItems.map((i) => i.centerX);
-  const allCentersY = floorItems.map((i) => i.centerY);
+  if (Math.abs(item.centerY - rowAvgY) <= rowTolerance) {
+    lastRow.push(item);
+  } else {
+    rows.push([item]);
+  }
+}
 
-  const globalCenterX =
-    allCentersX.reduce((acc, x) => acc + x, 0) / allCentersX.length;
-  const globalCenterY =
-    allCentersY.reduce((acc, y) => acc + y, 0) / allCentersY.length;
+// respetar orden visual actual
+rows.forEach((row) => row.sort((a, b) => a.centerX - b.centerX));
 
-  const repositioned = [];
+// ancla real actual del conjunto
+const anchorLeft = Math.min(
+  ...floorItems.map((i) => i.centerX - i.width / 2)
+);
 
-  // Recalcular posiciones fila por fila
-  rows.forEach((row, rowIndex) => {
-    const rowWidths = row.map((r) => r.width);
-    const rowHeights = row.map((r) => r.height);
+const anchorTop = Math.min(
+  ...floorItems.map((i) => i.centerY - i.height / 2)
+);
 
-    const totalRowWidth =
-      rowWidths.reduce((acc, w) => acc + w, 0) + gapX * Math.max(0, row.length - 1);
+const repositioned = [];
 
-    let cursorX = globalCenterX - totalRowWidth / 2;
+let cursorY = anchorTop;
 
-    const rowHeight = Math.max(...rowHeights);
+rows.forEach((row, rowIndex) => {
+  const rowHeight = Math.max(...row.map((r) => r.height));
+  let cursorX = anchorLeft;
 
-    const totalLayoutHeight =
-      rows.reduce((acc, r) => {
-        const h = Math.max(...r.map((x) => x.height));
-        return acc + h;
-      }, 0) +
-      gapY * Math.max(0, rows.length - 1);
+  row.forEach((item) => {
+    const newCenterX = cursorX + item.width / 2;
+    const newCenterY = cursorY + rowHeight / 2;
 
-    let startY = globalCenterY - totalLayoutHeight / 2;
-    for (let i = 0; i < rowIndex; i++) {
-      startY += Math.max(...rows[i].map((x) => x.height)) + gapY;
-    }
-
-    const newCenterY = startY + rowHeight / 2;
-
-    row.forEach((item) => {
-      const newCenterX = cursorX + item.width / 2;
-
-      repositioned.push({
-        id: item.area.id,
-        newCenterX,
-        newCenterY,
-        oldCenterX: item.centerX,
-        oldCenterY: item.centerY,
-      });
-
-      cursorX += item.width + gapX;
+    repositioned.push({
+      id: item.area.id,
+      newCenterX,
+      newCenterY,
+      oldCenterX: item.centerX,
+      oldCenterY: item.centerY,
     });
+
+    cursorX += item.width + gapX;
   });
+
+  cursorY += rowHeight + gapY;
+});
 
   const repositionMap = Object.fromEntries(
     repositioned.map((r) => [r.id, r])
@@ -1488,8 +1751,7 @@ const [spacingError, setSpacingError] = useState("");
     })
   );
 
-  setBlueAreasFloorFilter(String(floor));
-  setNewFloorSelected(floor);
+  syncActiveFloor(floor);
 }
 
 
@@ -1543,8 +1805,7 @@ const [spacingError, setSpacingError] = useState("");
       })
     );
 
-    setBlueAreasFloorFilter(String(floor));
-    setNewFloorSelected(floor);
+    syncActiveFloor(floor);
   }
   function areaSummaryPointMmRaw(area) {
     const poly = area?.points ?? [];
@@ -2137,7 +2398,12 @@ const [spacingError, setSpacingError] = useState("");
 
   
   // ✅ listado de áreas azules (source === "single")
-  const blueAreasList = useMemo(() => {
+function parseBoxNumber(label) {
+  const m = String(label || "").match(/\d+/);
+  return m ? Number(m[0]) : Number.POSITIVE_INFINITY;
+}
+
+const blueAreasList = useMemo(() => {
   const list = (paintAreasSvg ?? [])
     .filter((a) => a.source === "single")
     .map((a) => {
@@ -2151,7 +2417,14 @@ const [spacingError, setSpacingError] = useState("");
         rotationDeg: raw?.rotationDeg ?? 0,
       };
     })
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort((a, b) => {
+      const na = parseBoxNumber(a.label);
+      const nb = parseBoxNumber(b.label);
+
+      if (na !== nb) return na - nb;
+      return a.label.localeCompare(b.label);
+    });
+
   return list;
 }, [paintAreasSvg, paintAreas]);
 
@@ -2176,7 +2449,7 @@ const [spacingError, setSpacingError] = useState("");
         .sort((a, b) => Number(a[0]) - Number(b[0]))
         .map(([floor, items]) => ({
           floor: Number(floor),
-          items: items.sort((a, b) => a.label.localeCompare(b.label)),
+          items: sortBlueAreasForList(items),
         }));
     }, [blueAreasList, blueAreasFloorFilter]);
 
@@ -2245,6 +2518,33 @@ const [spacingError, setSpacingError] = useState("");
     }}
   >
 
+
+<div
+  style={{
+    position: "fixed",
+    right: 12,
+    bottom: 12,
+    zIndex: 9999,
+  }}
+>
+  <select
+    value={lang}
+    onChange={(e) => setLang(e.target.value)}
+    style={{
+      height: 26,
+      padding: "2px 6px",
+      borderRadius: 6,
+      border: "1px solid #d0d5dd",
+      fontSize: 12,
+      background: "#fff",
+      boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+    }}
+  >
+    <option value="es">ES</option>
+    <option value="en">EN</option>
+  </select>
+</div>
+
 {/* IZQUIERDA */}
 <div
   style={{
@@ -2272,7 +2572,7 @@ const [spacingError, setSpacingError] = useState("");
           marginBottom: 8,
         }}
       >
-        <div style={{ fontWeight: 900 }}>Gestionar pisos y altura</div>
+        <div style={{ fontWeight: 900 }}>{t.floorsTitle}</div>
 
         <button
           onClick={() => setFloorPanelOpen((v) => !v)}
@@ -2287,7 +2587,7 @@ const [spacingError, setSpacingError] = useState("");
             fontWeight: 700,
           }}
         >
-          {floorPanelOpen ? "Cerrar ▲" : "Abrir ▼"}
+          {floorPanelOpen ? t.close : t.open}
         </button>
       </div>
 
@@ -2297,7 +2597,7 @@ const [spacingError, setSpacingError] = useState("");
   
           {/* Piso */}
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <label style={{ fontSize: 11, fontWeight: 600 }}>Piso</label>
+            <label style={{ fontSize: 11, fontWeight: 600 }}>{t.floor}</label>
             <input
               type="number"
               value={newFloorNumber}
@@ -2313,7 +2613,7 @@ const [spacingError, setSpacingError] = useState("");
 
           {/* Z base */}
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <label style={{ fontSize: 11, fontWeight: 600 }}>Z base</label>
+            <label style={{ fontSize: 11, fontWeight: 600 }}>{t.zBase}</label>
             <input
               type="number"
               value={newFloorZ}
@@ -2329,7 +2629,7 @@ const [spacingError, setSpacingError] = useState("");
 
           {/* Color preview */}
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <label style={{ fontSize: 11, fontWeight: 600 }}>Color</label>
+            <label style={{ fontSize: 11, fontWeight: 600 }}>{t.color}</label>
             <div
               style={{
                 width: 60,
@@ -2356,7 +2656,7 @@ const [spacingError, setSpacingError] = useState("");
               cursor: "pointer",
             }}
           >
-            Guardar
+            {t.save}
           </button>
 
         </div>
@@ -2400,18 +2700,20 @@ const [spacingError, setSpacingError] = useState("");
               {/* Botón compacto */}
               <button
                 onClick={() => deleteFloorDef(f.floor)}
+                disabled={Number(f.floor) !== lastCreatedFloor}
                 style={{
-                  fontSize: 10,
-                  padding: "0 6px",
-                  height: 18,
-                  borderRadius: 4,
-                  background: "#ef4444",
-                  color: "#fff",
                   border: "none",
-                  cursor: "pointer",
+                  background: Number(f.floor) === lastCreatedFloor ? "#ef4444" : "#fecaca",
+                  color: "#fff",
+                  borderRadius: 4,
+                  width: 20,
+                  height: 20,
+                  cursor: Number(f.floor) === lastCreatedFloor ? "pointer" : "not-allowed",
+                  opacity: Number(f.floor) === lastCreatedFloor ? 1 : 0.5,
+                  fontWeight: 700,
                 }}
               >
-                ✕
+                ×
               </button>
             </div>
           ))}
@@ -2426,199 +2728,196 @@ const [spacingError, setSpacingError] = useState("");
 
 
     {/* panel agregar items  */}
-    <div style={sectionGroupStyle}>
-            <div
-              style={{
-                paddingTop: 0,
-                marginTop: 0,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                  marginBottom: 8,
-                }}
-              >
-                <div style={{ fontWeight: 900 }}>Agregar items</div>
+<div style={sectionGroupStyle}>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 6,
+      marginBottom: 6,
+    }}
+  >
+    <div style={{ fontWeight: 900, fontSize: 13 }}>{t.addItemsTitle}</div>
 
-                <button
-                  onClick={() => setAddPanelOpen((v) => !v)}
-                  style={{
-                    border: "1px solid #2563eb",
-                    background: addPanelOpen ? "#2563eb" : "#dbeafe",
-                    color: addPanelOpen ? "#ffffff" : "#1d4ed8",
-                    borderRadius: 6,
-                    padding: "4px 8px",
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: 700,
-                  }}
-                >
-                  {addPanelOpen ? "Cerrar ▲" : "Abrir ▼"}
-                </button>
-              </div>
+    <button
+      onClick={() => setAddPanelOpen((v) => !v)}
+      style={{
+        border: "1px solid #2563eb",
+        background: addPanelOpen ? "#2563eb" : "#dbeafe",
+        color: addPanelOpen ? "#ffffff" : "#1d4ed8",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        fontSize: 11,
+        fontWeight: 700,
+        lineHeight: 1.1,
+      }}
+    >
+      {addPanelOpen ? t.close : t.open}
+    </button>
+  </div>
 
-          </div>
+  {addPanelOpen && (
+    <>
+      <div style={{ display: "grid", gap: 4 }}>
+  {/* fila 1 */}
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "32px 42px 20px 80px 28px 60px",
+      gap: 4,
+      alignItems: "center",
+      justifyContent: "start",
+    }}
+  >
+    <label style={{ fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
+      {t.label}
+    </label>
+    <input
+      value={newLabel}
+      onChange={(e) => setNewLabel(e.target.value)}
+      placeholder="B1"
+      style={{
+        width: "42px",
+        height: 22,
+        padding: "1px 4px",
+        borderRadius: 6,
+        border: "1px solid #d0d5dd",
+        background: "#fff",
+        color: "#111827",
+        fontSize: 10,
+        boxSizing: "border-box",
+      }}
+    />
 
+    <label style={{ fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
+      {t.xy}
+    </label>
+    <input
+      value={newXY}
+      onChange={(e) => setNewXY(e.target.value)}
+      placeholder="(43,544)"
+      style={{
+        width: "80px",
+        height: 22,
+        padding: "1px 4px",
+        borderRadius: 6,
+        border: "1px solid #d0d5dd",
+        background: "#fff",
+        color: "#111827",
+        fontSize: 10,
+        boxSizing: "border-box",
+      }}
+    />
 
+    <label style={{ fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
+      {t.floor}
+    </label>
+    <select
+      value={newFloorSelected}
+      onChange={(e) => syncActiveFloor(Number(e.target.value))}
+      style={{
+        width: "60px",
+        height: 22,
+        padding: "1px 4px",
+        borderRadius: 6,
+        border: "1px solid #d0d5dd",
+        background: "#fff",
+        color: "#111827",
+        fontSize: 10,
+        boxSizing: "border-box",
+      }}
+    >
+      {floorDefs.map((f) => (
+        <option key={f.floor} value={f.floor}>
+           {f.floor}
+        </option>
+      ))}
+    </select>
+  </div>
 
-{addPanelOpen && (
-                <>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr",
-                      gap: 8,
-                    }}
-                  >
-                    <div>
-                      <label style={{ fontSize: 12, color: "#333", display: "block", marginBottom: 4 }}>
-                        label (máx 5):
-                      </label>
-                      <input
-                        value={newLabel}
-                        onChange={(e) => setNewLabel(e.target.value)}
-                        placeholder="B1"
-                        style={{
-                          width: "100%",
-                          padding: "6px 8px",
-                          borderRadius: 6,
-                          border: "1px solid #d0d5dd",
-                          background: "#fff",
-                          color: "#111827",
-                          fontSize: 13,
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
+  {/* fila 2 */}
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "32px 42px 20px 80px 28px 60px",
+      gap: 4,
+      alignItems: "center",
+      justifyContent: "start",
+    }}
+  >
+    <label style={{ fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
+      {t.width}
+    </label>
+    <input
+      type="number"
+      value={newW}
+      onChange={(e) => setNewW(Number(e.target.value || 0))}
+      style={{
+        width: "42px",
+        height: 22,
+        padding: "1px 4px",
+        borderRadius: 6,
+        border: "1px solid #d0d5dd",
+        background: "#fff",
+        color: "#111827",
+        fontSize: 10,
+        boxSizing: "border-box",
+      }}
+    />
 
-                    <div>
-                      <label style={{ fontSize: 12, color: "#333", display: "block", marginBottom: 4 }}>
-                        coordenadas (x,y):
-                      </label>
-                      <input
-                        value={newXY}
-                        onChange={(e) => setNewXY(e.target.value)}
-                        placeholder="(43, 544)"
-                        style={{
-                          width: "100%",
-                          padding: "6px 8px",
-                          borderRadius: 6,
-                          border: "1px solid #d0d5dd",
-                          background: "#fff",
-                          color: "#111827",
-                          fontSize: 13,
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
+    <label style={{ fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
+      {t.height}
+    </label>
+    <input
+      type="number"
+      value={newH}
+      onChange={(e) => setNewH(Number(e.target.value || 0))}
+      style={{
+        width: "42px",
+        height: 22,
+        padding: "1px 4px",
+        borderRadius: 6,
+        border: "1px solid #d0d5dd",
+        background: "#fff",
+        color: "#111827",
+        fontSize: 10,
+        boxSizing: "border-box",
+      }}
+    />
 
-                    <div>
-                      <label style={{ fontSize: 12, color: "#333", display: "block", marginBottom: 4 }}>
-                        piso:
-                      </label>
-                      <select
-                        value={newFloorSelected}
-                        onChange={(e) => setNewFloorSelected(Number(e.target.value))}
-                        style={{
-                          width: "100%",
-                          padding: "6px 8px",
-                          borderRadius: 6,
-                          border: "1px solid #d0d5dd",
-                          background: "#fff",
-                          color: "#111827",
-                          fontSize: 13,
-                          boxSizing: "border-box",
-                        }}
-                      >
-                        {floorDefs.map((f) => (
-                          <option key={f.floor} value={f.floor}>
-                            Piso {f.floor}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 1fr",
-                        gap: 8,
-                      }}
-                    >
-                      <div>
-                        <label style={{ fontSize: 12, color: "#333", display: "block", marginBottom: 4 }}>
-                          ancho (mm):
-                        </label>
-                        <input
-                          type="number"
-                          value={newW}
-                          onChange={(e) => setNewW(Number(e.target.value || 0))}
-                          style={{
-                            width: "100%",
-                            padding: "6px 8px",
-                            borderRadius: 6,
-                            border: "1px solid #d0d5dd",
-                            background: "#fff",
-                            color: "#111827",
-                            fontSize: 13,
-                            boxSizing: "border-box",
-                          }}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ fontSize: 12, color: "#333", display: "block", marginBottom: 4 }}>
-                          alto (mm):
-                        </label>
-                        <input
-                          type="number"
-                          value={newH}
-                          onChange={(e) => setNewH(Number(e.target.value || 0))}
-                          style={{
-                            width: "100%",
-                            padding: "6px 8px",
-                            borderRadius: 6,
-                            border: "1px solid #d0d5dd",
-                            background: "#fff",
-                            color: "#111827",
-                            fontSize: 13,
-                            boxSizing: "border-box",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {addOneError ? (
-                    <div style={{ marginTop: 8, color: "#b00020", fontSize: 12 }}>
-                      {addOneError}
-                    </div>
-                  ) : null}
-
-                  <button
-                    onClick={addOnePoint}
-                    style={{
-                      marginTop: 10,
-                      padding: "9px 12px",
-                      cursor: "pointer",
-                      width: "100%",
-                      borderRadius: 8,
-                      border: "none",
-                      background: "#2563eb",
-                      color: "#fff",
-                      fontWeight: 600,
-                      fontSize: 13,
-                    }}
-                  >
-                    Agregar (crea área azul)
-                  </button>
-                </>
-              )}
+    <button
+      onClick={addOnePoint}
+      style={{
+        height: 22,
+        padding: "0 8px",
+        cursor: "pointer",
+        width: "72px",
+        borderRadius: 6,
+        border: "none",
+        background: "#2563eb",
+        color: "#fff",
+        fontWeight: 700,
+        fontSize: 10,
+        lineHeight: 1,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {t.add}
+    </button>
+  </div>
 </div>
+
+      {addOneError ? (
+        <div style={{ marginTop: 5, color: "#b00020", fontSize: 11 }}>
+          {addOneError}
+        </div>
+      ) : null}
+    </>
+  )}
+</div>
+{/* panel agregar items  */}
 
 
 
@@ -2641,13 +2940,20 @@ const [spacingError, setSpacingError] = useState("");
                     }}
                   >
                     <div style={{ fontWeight: 900 }}>
-                      Gestionar items agregadas ({filteredBlueAreasList.length})
+                      {t.manageItemsTitle} ({filteredBlueAreasList.length})
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <select
                         value={blueAreasFloorFilter}
-                        onChange={(e) => setBlueAreasFloorFilter(e.target.value)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setBlueAreasFloorFilter(value);
+
+                          if (value !== "ALL") {
+                            syncActiveFloor(Number(value));
+                          }
+                        }}
                         style={{
                           padding: "4px 8px",
                           borderRadius: 6,
@@ -2657,10 +2963,10 @@ const [spacingError, setSpacingError] = useState("");
                           fontSize: 12,
                         }}
                       >
-                        <option value="ALL">Todos</option>
+                        <option value="ALL">{t.all}</option>
                         {floorDefs.map((f) => (
                           <option key={f.floor} value={String(f.floor)}>
-                            Piso {f.floor}
+                            {t.floor} {f.floor}
                           </option>
                         ))}
                       </select>
@@ -2678,7 +2984,7 @@ const [spacingError, setSpacingError] = useState("");
                           fontWeight: 700,
                         }}
                       >
-                        {blueAreasPanelOpen ? "Cerrar ▲" : "Abrir ▼"}
+                        {blueAreasPanelOpen ? t.close : t.open}
                       </button>
                     </div>
                   </div>
@@ -2698,7 +3004,8 @@ const [spacingError, setSpacingError] = useState("");
                   >
                     {blueAreasGroupedByFloor.length === 0 ? (
                         <div style={{ color: "#ffffff", opacity: 0.9 }}>
-                          — (no hay áreas azules para ese piso) —
+                          — {t.manageItemsNoItems}
+ —
                         </div>
                       ) : (
                         blueAreasGroupedByFloor.map((group) => (
@@ -2720,7 +3027,7 @@ const [spacingError, setSpacingError] = useState("");
                                 color: getFloorColor(group.floor),
                               }}
                             >
-                              Piso {group.floor}
+                              {t.floor} {group.floor}
                             </div>
 
                             <div style={{ display: "grid", gap: 8 }}>
@@ -2760,7 +3067,7 @@ const [spacingError, setSpacingError] = useState("");
                                       flexShrink: 0, // 👈 nunca se achica ni baja
                                     }}
                                   >
-                                    Girar
+                                    {t.rotate}
                                   </button>
                                 </div>
                               ))}
@@ -2775,107 +3082,174 @@ const [spacingError, setSpacingError] = useState("");
     {/* ✅ lista de áreas azules */}
 
 
-      {/*// clonacion */}
-    <div style={sectionGroupStyle}>
-
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                  marginBottom: 10,
-                }}
-              >
-                <div style={{ fontWeight: 900 }}>Clonar items</div>
-
-                <button
-                  onClick={() => setClonePanelOpen((v) => !v)}
-                  style={{
-                    border: "1px solid #2563eb",
-                    background: addPanelOpen ? "#2563eb" : "#dbeafe",
-                    color: addPanelOpen ? "#ffffff" : "#1d4ed8",
-                    borderRadius: 6,
-                    padding: "4px 8px",
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: 700,
-                  }}
-                >
-                  {clonePanelOpen ? "Cerrar ▲" : "Abrir ▼"}
-                </button>
-              </div>
-
-              {clonePanelOpen && (
-                <div style={{ display: "grid", gap: 8 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700 }}>Piso origen</label>
-                  <select
-                    value={cloneSourceFloor}
-                    onChange={(e) => setCloneSourceFloor(Number(e.target.value))}
-                    style={{ padding: 8, borderRadius: 8 }}
-                  >
-                    {(floorDefs ?? []).map((f) => (
-                      <option key={`clone-src-${f.floor}`} value={f.floor}>
-                        Piso {f.floor}
-                      </option>
-                    ))}
-                  </select>
-
-                  <label style={{ fontSize: 12, fontWeight: 700 }}>Piso destino</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={cloneTargetFloor}
-                    onChange={(e) => setCloneTargetFloor(Number(e.target.value || 1))}
-                    style={{ padding: 8, borderRadius: 8 }}
-                  />
-
-                  <label style={{ fontSize: 12, fontWeight: 700 }}>
-                    Color ítems piso destino
-                  </label>
-                  <input
-                    type="color"
-                    value={cloneTargetColor}
-                    onChange={(e) => setCloneTargetColor(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: 40,
-                      border: "1px solid #d1d5db",
-                      borderRadius: 8,
-                      background: "#fff",
-                      cursor: "pointer",
-                    }}
-                  />
-
-                  {cloneError ? (
-                    <div style={{ color: "#b00020", fontSize: 12 }}>{cloneError}</div>
-                  ) : null}
-
-                  <button
-                    onClick={cloneItemsFromFloor}
-                    style={{
-                      marginTop: 4,
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "none",
-                      background: "#2563eb",
-                      color: "#fff",
-                      fontWeight: 800,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Clonar piso completo
-                  </button>
-                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-                    Copia todos los ítems del piso origen al piso destino.
-                  </div>
-        
-                </div>
-              )}
 
 
+{/** Asignar separacion entre items */}
+
+<div style={sectionGroupStyle}>
+  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <span style={{ fontWeight: 700 }}>
+      {t.separationTitle}
+    </span>
+            <input
+              type="number"
+              min="1"
+              value={spacingFloorNumber}
+              onChange={(e) => setSpacingFloorNumber(Number(e.target.value))}
+              style={{
+                width: "50px",
+                height: 28,
+                padding: "2px 4px",
+                borderRadius: 6,
+                fontSize: 12,
+              }}
+            />
+            <span style={{ fontWeight: 700 }}>X:</span>
+            <input
+              type="number"
+              value={spacingGapX}
+              onChange={(e) => setSpacingGapX(Number(e.target.value))}
+              style={{
+                width: "40px",
+                height: 28,
+                padding: "2px 4px",
+                borderRadius: 6,
+                fontSize: 12,
+              }}
+            />
+            <span style={{ fontWeight: 700 }}>{t.Y}:</span>
+            <input
+              type="number"
+              value={spacingGapY}
+              onChange={(e) => setSpacingGapY(Number(e.target.value))}
+              style={{
+                width: "40px",
+                height: 28,
+                padding: "2px 4px",
+                borderRadius: 6,
+                fontSize: 12,
+              }}
+            />
+</div>
+
+  
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 6 }}>
+            <button
+              onClick={applySpacingToFloor}
+              style={{
+                border: "1px solid #2563eb",
+                background: "#2563eb",
+                color: "#fff",
+                borderRadius: 6,
+                height: 28,
+                padding: "0 10px",
+                fontSize: 12,
+                fontWeight: 700,
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              {t.apply}
+            </button>
+          
+
+          {spacingError && (
+            <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 4 }}>
+              {spacingError}
+            </div>
+          )}
+        </div>
+      
+
+
+
+</div>
+{/** Asignar separacion entre items */}
+
+
+     {/*// clonacion */}
+<div style={sectionGroupStyle}>
+  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+  
+    <span style={{
+        fontSize: 12,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+      }}>{t.cloneTitle}</span>
+
+  
+    <select
+      value={cloneSourceFloor}
+      onChange={(e) => setCloneSourceFloor(Number(e.target.value))}
+      style={{
+        width: "50px",
+        height: 28,
+        padding: "2px 4px",
+        borderRadius: 6,
+        fontSize: 12,
+      }}
+    >
+      {(floorDefs ?? []).map((f) => (
+        <option key={`clone-src-${f.floor}`} value={f.floor}>
+          {f.floor}
+        </option>
+      ))}
+    </select>
+
+    <label
+      style={{
+        fontSize: 12,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+      }}
+    >
+         {t.destinationFloor}
+    </label>
+    <input
+      type="number"
+      min={1}
+      value={cloneTargetFloor}
+      onChange={(e) => setCloneTargetFloor(Number(e.target.value || 1))}
+      style={{
+        width: "50px",
+        height: 28,
+        padding: "2px 4px",
+        borderRadius: 6,
+        fontSize: 12,
+        boxSizing: "border-box",
+      }}
+    />
     </div>
-    {/*// clonacion */}
+
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 6 }}>
+          <button
+            onClick={cloneItemsFromFloor}
+            style={{
+              height: 28,
+              padding: "0 12px",
+              borderRadius: 6,
+              border: "none",
+              background: "#2563eb",
+              color: "#fff",
+              fontWeight: 800,
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+           {t.clone}
+          </button>
+        </div>
+
+  {cloneError ? (
+    <div style={{ color: "#b00020", fontSize: 12, marginTop: 4 }}>
+      {cloneError}
+    </div>
+  ) : null}
+</div>
+{/*// clonacion */}
+
+
+
 
   </div>
 </div>
@@ -3373,85 +3747,136 @@ const [spacingError, setSpacingError] = useState("");
               <div
                 style={{
                   position: "fixed",
-                  left: areaMenu.x + 10,
-                  top: areaMenu.y + 10,
-                  width: 280,
+                  left: areaMenu.x,
+                  top: areaMenu.y,
                   background: "#fff",
-                  border: "1px solid #ddd",
-                  borderRadius: 10,
-                  padding: 10,
-                  boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
+                  border: "1px solid #d1d5db",
+                  borderRadius: 8,
+                  padding: 8,
                   zIndex: 9999,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                  minWidth: 260,
                 }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div style={{ fontWeight: 900, marginBottom: 6 }}>
+              ><div style={{ fontWeight: 900, marginBottom: 6 }}>
                   {truncateLabel5(area.label) || "AREA"} ({pos.x},{pos.y})
                 </div>
-
-                <div style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
-                  Cambia label y/o el punto (x,y) del “centro interior”.
-                </div>
-
-                <div style={{ fontSize: 12, marginBottom: 6 }}>
-                  Label (máx 5)
-                </div>
-                <input
-                  value={areaMenu.draftLabel}
-                  onChange={(e) =>
-                    setAreaMenu((m) => ({ ...m, draftLabel: e.target.value }))
-                  }
-                  style={{ width: "100%", boxSizing: "border-box" }}
-                />
-
-                <div style={{ fontSize: 12, marginTop: 10, marginBottom: 6 }}>
-                  Mover a (x,y)
-                </div>
-                <input
-                  value={areaMenu.draftXY}
-                  onChange={(e) =>
-                    setAreaMenu((m) => ({ ...m, draftXY: e.target.value }))
-                  }
-                  style={{ width: "100%", boxSizing: "border-box" }}
-                />
-
-                {areaMenu.error ? (
-                  <div style={{ marginTop: 8, color: "#b00020", fontSize: 12 }}>
-                    {areaMenu.error}
-                  </div>
-                ) : null}
-
-                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                {/* ❌ Cerrar arriba */}
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
                   <button
                     onClick={() =>
                       setAreaMenu((m) => ({ ...m, open: false, areaId: "" }))
                     }
-                    style={{ flex: 1, padding: "8px 10px", cursor: "pointer" }}
-                  >
-                    Cerrar
-                  </button>
-
-                  <button
-                    onClick={() => applyAreaEdit()}
-                    style={{ flex: 1, padding: "8px 10px", cursor: "pointer" }}
-                  >
-                    Aplicar
-                  </button>
-
-                  <button
-                    onClick={() => deletePolygon(area.id)}
                     style={{
-                      padding: "8px 10px",
-                      cursor: "pointer",
-                      borderRadius: 8,
                       border: "none",
-                      background: "#dc2626",
-                      color: "#fff",
-                      fontWeight: 600,
-                      fontSize: 13,
+                      background: "transparent",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                      fontSize: 14,
+                      color: "#ef4444",
                     }}
                   >
-                    Eliminar
+                    ✕
+                  </button>
+                </div>
+
+                {/* Label + XY en una fila */}
+                <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700 }}>{t.label}</span>
+
+                  <input
+                    value={areaMenu.draftLabel}
+                    onChange={(e) =>
+                      setAreaMenu((m) => ({ ...m, draftLabel: e.target.value }))
+                    }
+                    style={{
+                      width: 50,
+                      height: 24,
+                      fontSize: 12,
+                      borderRadius: 6,
+                      border: "1px solid #9ca3af",
+                      padding: "2px 4px",
+                    }}
+                  />
+
+                  <span style={{ fontSize: 11, fontWeight: 700 }}>{t.xy}</span>
+
+                  <input
+                    value={areaMenu.draftXY}
+                    onChange={(e) =>
+                      setAreaMenu((m) => ({ ...m, draftXY: e.target.value }))
+                    }
+                    style={{
+                      width: 100,
+                      height: 24,
+                      fontSize: 12,
+                      borderRadius: 6,
+                      border: "1px solid #9ca3af",
+                      padding: "2px 4px",
+                    }}
+                  />
+                </div>
+
+                {/* Botones */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    justifyContent: "center",
+                    marginTop: 8,
+                  }}
+                >
+                  <button
+                    onClick={applyAreaEdit}
+                    style={{
+                      height: 26,
+                      padding: "0 10px",
+                      borderRadius: 6,
+                      border: "1px solid #2563eb",
+                      background: "#2563eb",
+                      color: "#fff",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {t.apply}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      rotateArea90(areaMenu.areaId);
+                      setAreaMenu((m) => ({ ...m, open: false, areaId: "" }));
+                    }}
+                    style={{
+                      height: 26,
+                      padding: "0 10px",
+                      borderRadius: 6,
+                      border: "1px solid #2563eb",
+                      background: "#2563eb",
+                      color: "#fff",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {t.rotate}
+                  </button>
+
+                  <button
+                    onClick={() => deletePolygon(areaMenu.areaId)}
+                    style={{
+                      height: 26,
+                      padding: "0 10px",
+                      borderRadius: 6,
+                      border: "none",
+                      background: "#ef4444",
+                      color: "#fff",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {t.delete}
                   </button>
                 </div>
               </div>
@@ -3504,7 +3929,7 @@ const [spacingError, setSpacingError] = useState("");
                         whiteSpace: "nowrap",
                       }}
                     >
-                      Gestionar Robot y Pallets
+                      {t.robotPanelTitle}
                     </div>
 
                     <div
@@ -3531,7 +3956,7 @@ const [spacingError, setSpacingError] = useState("");
                           checked={paintEnabled}
                           onChange={(e) => setPaintEnabled(e.target.checked)}
                         />
-                        Mostrar
+                        {t.show}
                       </label>
 
                       <button
@@ -3549,7 +3974,7 @@ const [spacingError, setSpacingError] = useState("");
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {paintPanelOpen ? "Cerrar ▲" : "Abrir ▼"}
+                        {paintPanelOpen ? t.close : t.open}
                       </button>
                     </div>
                   </div>
@@ -3557,7 +3982,7 @@ const [spacingError, setSpacingError] = useState("");
                   {paintPanelOpen && (
                     <>
                       <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-                        Formato por línea: <b>Label,(x,y),(x,y),(x,y)...</b> (Label máx 5)
+                       {t.formatLine} <b>Label,(x,y),(x,y),(x,y)...</b> (Label máx 5)
                       </div>
 
                       <textarea
@@ -3591,7 +4016,7 @@ const [spacingError, setSpacingError] = useState("");
                           width: "100%",
                         }}
                       >
-                        Aplicar áreas
+                        {t.applyAreas}
                       </button>
 
                       <div
@@ -3602,7 +4027,7 @@ const [spacingError, setSpacingError] = useState("");
                           color: "#555",
                         }}
                       >
-                        áreas cargadas: {paintAreas?.length ?? 0}
+                        {t.loadedAreas}:  {paintAreas?.length ?? 0}
                       </div>
                     </>
                   )}
@@ -3647,7 +4072,7 @@ const [spacingError, setSpacingError] = useState("");
                 whiteSpace: "nowrap",
               }}
             >
-              Generar Lua
+              {t.luaTitle}
             </div>
 
             <button
@@ -3666,7 +4091,7 @@ const [spacingError, setSpacingError] = useState("");
                 flexShrink: 0,
               }}
             >
-              {luaPanelOpen ? "Cerrar ▲" : "Abrir ▼"}
+              {luaPanelOpen ? t.close : t.open}
             </button>
           </div>
 
@@ -3729,7 +4154,7 @@ const [spacingError, setSpacingError] = useState("");
                   fontSize: 13,
                 }}
               >
-                Generar secuencia Piso 1
+                {t.generateSequence}
               </button>
 
               <textarea
@@ -3771,7 +4196,7 @@ const [spacingError, setSpacingError] = useState("");
                   fontSize: 13,
                 }}
               >
-                Exportar LUA (.txt)
+                {t.exportLua} 
               </button>
             </>
           )}
@@ -3798,7 +4223,7 @@ const [spacingError, setSpacingError] = useState("");
                 whiteSpace: "nowrap",
               }}
             >
-              Proyectos (Importar y Exportar)
+              {t.projectsTitle}
             </div>
 
             <button
@@ -3817,7 +4242,7 @@ const [spacingError, setSpacingError] = useState("");
                 flexShrink: 0,
               }}
             >
-              {projectPanelOpen ? "Cerrar ▲" : "Abrir ▼"}
+              {projectPanelOpen ? t.close : t.open}
             </button>
           </div>
 
@@ -3837,7 +4262,7 @@ const [spacingError, setSpacingError] = useState("");
                   fontSize: 13,
                 }}
               >
-                Guardar proyecto (.json)
+                {t.saveProject}
               </button>
 
               <button
@@ -3854,7 +4279,7 @@ const [spacingError, setSpacingError] = useState("");
                   fontSize: 13,
                 }}
               >
-                Cargar proyecto (.json)
+                {t.loadProject}
               </button>
 
               <input
@@ -3895,7 +4320,7 @@ const [spacingError, setSpacingError] = useState("");
               whiteSpace: "nowrap",
             }}
           >
-            Modo de arrastre
+            {t.dragModeTitle}
           </div>
 
           <div style={{ position: "relative" }}>
@@ -3916,8 +4341,8 @@ const [spacingError, setSpacingError] = useState("");
                   MozAppearance: "none",
                 }}
               >
-                <option value="single">Unitario</option>
-                <option value="group">Grupal</option>
+                <option value="single">{t.unitary}</option>
+                <option value="group">{t.group}</option>
               </select>
             
               <div
@@ -3939,7 +4364,7 @@ const [spacingError, setSpacingError] = useState("");
         </div>
 
         <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
-          Unitario: mueve una caja. Grupal: mueve todo el piso.
+          {t.dragUnitDesc}
         </div>
       </div>
 
@@ -3952,27 +4377,37 @@ const [spacingError, setSpacingError] = useState("");
                
 
 {/** items 3D */}
+
+
 <div style={sectionGroupStyle}>
   <div style={sectionGroupTitleStyle}>
+          <button
+            onClick={open3DPopup}
+            style={{
+              padding: "8px 12px",
+              background: "#2563eb",
+              color: "#fff",
+              border: "none",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            {t.view3D}
+          </button>
+    </div>
 
-          <div style={{ marginTop: 16 }}>
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 700,
-                marginBottom: 8,
-                color: "#111827",
-              }}
-            >
-              Vista 3D
-            </div>
-
-            
-          </div>
 
 
-            </div>
-          </div>
+        <div style={{ marginTop: 10 }}>
+          <RobotScene3D
+            paintAreas={normalizePaintAreasFor3D(paintAreas)}
+            floorDefs={floorDefs}
+            height={220}
+          />
+        </div>
+
+    </div>
 {/** items 3D */}
 
 
@@ -3980,102 +4415,10 @@ const [spacingError, setSpacingError] = useState("");
 
 
 
-{/** Asignar separacion entre items */}
-
-<div style={sectionGroupStyle}>
-  <div style={sectionGroupTitleStyle}>
-    Separación entre cajas por piso
-    <button
-      onClick={() => setSpacingPanelOpen((v) => !v)}
-      style={{
-        marginLeft: 8,
-        border: "1px solid #7c3aed",
-        background: spacingPanelOpen ? "#7c3aed" : "#ede9fe",
-        color: spacingPanelOpen ? "#ffffff" : "#5b21b6",
-        borderRadius: 6,
-        padding: "4px 8px",
-        cursor: "pointer",
-        fontSize: 12,
-        fontWeight: 700,
-      }}
-    >
-      {spacingPanelOpen ? "Ocultar" : "Mostrar"}
-    </button>
-  </div>
-
-  {spacingPanelOpen && (
-    <div style={{ display: "grid", gap: 8 }}>
-      <label style={{ fontSize: 12, fontWeight: 600 }}>
-        Piso
-        <input
-          type="number"
-          min="1"
-          value={spacingFloorNumber}
-          onChange={(e) => setSpacingFloorNumber(Number(e.target.value))}
-          style={{ width: "100%", marginTop: 4 }}
-        />
-      </label>
-
-      <label style={{ fontSize: 12, fontWeight: 600 }}>
-        Separación X
-        <input
-          type="number"
-          value={spacingGapX}
-          onChange={(e) => setSpacingGapX(Number(e.target.value))}
-          style={{ width: "100%", marginTop: 4 }}
-        />
-      </label>
-
-      <label style={{ fontSize: 12, fontWeight: 600 }}>
-        Separación Y
-        <input
-          type="number"
-          value={spacingGapY}
-          onChange={(e) => setSpacingGapY(Number(e.target.value))}
-          style={{ width: "100%", marginTop: 4 }}
-        />
-      </label>
-
-      <button
-        onClick={applySpacingToFloor}
-        style={{
-          border: "1px solid #2563eb",
-          background: "#2563eb",
-          color: "#fff",
-          borderRadius: 8,
-          padding: "8px 10px",
-          cursor: "pointer",
-          fontWeight: 700,
-        }}
-      >
-        Aplicar separación
-      </button>
-
-      {spacingError ? (
-        <div style={{ color: "#b91c1c", fontSize: 12, fontWeight: 600 }}>
-          {spacingError}
-        </div>
-      ) : null}
-    </div>
-  )}
-</div>
-{/** Asignar separacion entre items */}
 
 
-<button
-  onClick={open3DPopup}
-  style={{
-    padding: "8px 12px",
-    background: "#2563eb",
-    color: "#fff",
-    border: "none",
-    borderRadius: 6,
-    cursor: "pointer",
-    fontWeight: 700,
-  }}
->
-  Ver en 3D
-</button>
+
+
 
 
 
