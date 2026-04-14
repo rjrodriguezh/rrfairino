@@ -3934,7 +3934,7 @@ const blueAreasList = useMemo(() => {
     </div>
 
 
-
+{/**
 <button
   onClick={exportFairinoLuaFile} disabled={hasInvalidFairinoBoxes}
   style={{
@@ -3951,7 +3951,7 @@ const blueAreasList = useMemo(() => {
 >
   Exportar LUA FAIRINO (.lua)
 </button>
-
+*/}
 
         <div style={{ marginTop: 10 }}>
           <RobotScene3D
@@ -3972,6 +3972,7 @@ const blueAreasList = useMemo(() => {
 
 
 {/** FairinoPreview */}
+{/** 
 <div
   style={{
     marginTop: 8,
@@ -3987,7 +3988,7 @@ const blueAreasList = useMemo(() => {
 >
   {JSON.stringify(fairinoPreview.motionPlan, null, 2)}
 </div>
-
+*/}
 {/** FairinoPreview */}
 
 
@@ -4003,7 +4004,7 @@ const blueAreasList = useMemo(() => {
         fontWeight: 700,
       }}
     >
-      Hay cajas fuera de una zona válida. No se puede exportar LUA todavía.
+      {t.BoxesInvalidForFairino}      
     </div>
   ) : (
     <div
@@ -4017,7 +4018,7 @@ const blueAreasList = useMemo(() => {
         fontWeight: 700,
       }}
     >
-      Todas las cajas están en una zona válida para FAIRINO.
+      {t.allBoxesValidForFairino}
     </div>
   )}
 

@@ -60,6 +60,8 @@ export const messages = {
     apply: "Aplicar",
     rotate: "Girar",
     delete: "Eliminar",
+    BoxesInvalidForFairino: "Hay cajas fuera de una zona válida. No se recomienda exportar LUA todavía.",
+    allBoxesValidForFairino: "Todas las cajas están en una zona válida para FAIRINO."
   },
 
   en: {
@@ -118,5 +120,7 @@ export const messages = {
     apply: "Apply",
     rotate: "Rotate",
     delete: "Delete",
+    BoxesInvalidForFairino: "There are boxes in a valid zone for FAIRINO. Dont recommend export LUA yet.",
+    allBoxesValidForFairino: "All boxes are in a valid zone for FAIRINO."
   },
 };
